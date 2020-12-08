@@ -1,75 +1,30 @@
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
-from tensorflow.keras.preprocessing import image
-from tensorflow.keras.applications.resnet50 import ResNet50, preprocess_input, decode_predictions
-from sim_ann_attack import SimulatedAnnealingAttack
-from point import Point
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import Conv2D, MaxPool2D, Dense, Dropout, Flatten, Input
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.datasets import mnist
 
-model = ResNet50(include_top=True, weights="imagenet")
+(x_train, y_train), (x_test, y_test) = mnist.load_data()
+x_train = x_train.reshape([len(x_train), 28, 28, 1]) / 255
+x_test = x_test.reshape([len(x_test), 28, 28, 1]) / 255
 
-img_path = "../assets/dog2.jpg"
-img = image.load_img(img_path, target_size=(224, 224)) # standard resnet input dims
-img = image.img_to_array(img) / 255
+y_train = to_categorical(y_train, 10)
+y_test = to_categorical(y_test, 10)
 
-T_max = 1000
-T_min = 1
-T_delta = 0.01
-temps = np.arange(T_max, T_min, -T_delta)
+model = Sequential()
+model.add(Input(shape=[28, 28, 1]))
+model.add(Conv2D(32, (3,3), activation="relu"))
+model.add(MaxPool2D((2,2)))
+model.add(Dropout(0.5))
+model.add(Conv2D(64, (3,3), activation="relu"))
+model.add(MaxPool2D((2,2)))
+model.add(Dropout(0.25))
+model.add(Flatten())
+model.add(Dense(128, activation="relu"))
+model.add(Dense(256, activation="relu"))
+model.add(Dense(10, activation="softmax"))
+model.compile(loss="categorical_crossentropy", optimizer="adam", metrics=["accuracy", "mse"])
 
-all_images = []
-all_epsilons = []
-all_images.append(img)
-
-def mutate_point(pt):
-    random_color = [np.random.uniform(0, 1), np.random.uniform(0, 1), np.random.uniform(0, 1)] # RGB Channels
-    pt.colour = random_color
-    
-    return pt
-    
-def get_confidence(img):
-    x = np.expand_dims(img, axis=0)
-    x = preprocess_input(img)
-    pred = model.predict(x)
-    label = decode_predictions(pred, top=1)
-    confidence = label[0][0][-1]
-    
-    return confidence
-    
-def superimpose(pt, img):
-    img_copy = img.copy()
-    img_copy[pt.coords['x']][pt.coords['y']] = pt.colour
-    
-    return img_copy
-    
-print ("Poisoning image...")
-for i in range(len(temps)):
-    T = temps[i]
-    
-    point = Point(img)
-    
-    img_point = superimpose(point, img)
-    
-    epsilon = get_confidence(img)
-    epsilon_point = get_confidence(img_point)
-    
-    if epsilon_point < epsilon: # new image lowers confidence more
-        mut_point = mutate_point(point)
-        img_mut_point = superimpose(mut_point, img)
-        epsilon_mut = get_confidence(img_mut_point)
-        
-        if epsilon_mut < epsilon_point:
-            img = img_mut_point
-            epsilon = epsilon_mut
-        else:
-            img = img_point
-            epsilon = epsilon_point
-        
-    elif np.exp(-epsilon / T) < np.random.uniform(0, 1): # not using Boltzmann Constant k
-        img = img_point
-        
-    if i % 50 == 0:
-        print ("Current iteration: {} | Temperate: {} | Epsilon: {}".format(i+1, T, epsilon))
-        
-    all_images.append(img)
-    all_epsilons.append(epsilon)
+model.fit(x_train, y_train, validation_data=(x_test, y_test), epochs=10, verbose=1, batch_size=64)
+model.save("../bin/mnist_cnn.h5")
