@@ -2,6 +2,7 @@ import copy
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
+from skimage.measure import compare_ssim
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.datasets import mnist
@@ -24,13 +25,14 @@ label = y_test[0].max()
 # plt.title(y_test[0].argmax())
 # plt.show()
 
-def normalised_RMSE(img, cpy):
-    mse = np.sum(np.square(img - cpy))
-    return np.sqrt(mse)
+def get_diff(img, cpy):
+    (score, diff) = compare_ssim(img.flatten(), cpy.flatten(), full=True)
+    return score
 
 all_confidences = []
 
 T_MIN, T_MAX, T_DELTA = 1, 1000, 1
+theta = 0.15 # image similarity threshold
 temperatures = np.arange(T_MAX, T_MIN, -T_DELTA)
 
 for i in range(len(temperatures)):
@@ -42,14 +44,16 @@ for i in range(len(temperatures)):
     point = Mask()
     image_with_point = point.superimpose(image)
     confidence_with_point = model.predict(np.array([image_with_point])).max()
-    print (normalised_RMSE(image, image_with_point), confidence_with_point)
+    nmrse_score = get_diff(image, image_with_point)
     
-    if confidence_with_point < initial_confidence and normalised_RMSE(image, image_with_point) < 0.2:
+    print (nmrse_score, confidence_with_point, initial_confidence)
+
+    if confidence_with_point < initial_confidence and nmrse_score < theta:
         new_point = Mask()
         image_with_new_point = new_point.superimpose(image_with_point)
         confidence_with_new_point = model.predict(np.array([image_with_new_point])).max()
         
-        if confidence_with_new_point < confidence_with_point and normalised_RMSE(image_with_point, image_with_new_point) < 0.2:
+        if confidence_with_new_point < confidence_with_point and get_diff(image_with_point, image_with_new_point) < 0.2:
             image = image_with_new_point
             initial_confidence = confidence_with_new_point
         else:
